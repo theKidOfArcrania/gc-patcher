@@ -342,6 +342,14 @@ if(UNIX)
 endif()
 
 ########################################
+# Setup include directories (and make sure they are preferred over the Externals)
+#
+include_directories(Source/Core)
+if(ANDROID)
+  include_directories(Source/Android)
+endif()
+
+########################################
 # Process externals and setup their include directories
 #
 # NOTES about adding Externals:
@@ -357,6 +365,7 @@ endif()
 #     Externals/zlib/CMakeLists.txt (that is: NOT in some Src/ subdirectory)
 #
 add_subdirectory(Externals/cpp-optparse)
+add_subdirectory(Externals/xdelta3)
 
 dolphin_find_optional_system_library(BZip2 Externals/bzip2)
 

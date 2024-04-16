@@ -13,3 +13,6 @@
 [submodule "Externals/lz4/lz4"]
 	path = Externals/lz4/lz4
 	url = https://github.com/lz4/lz4
+[submodule "Externals/xdelta3/xdelta"]
+	path = Externals/xdelta3/xdelta
+	url = https://github.com/theKidOfArcrania/xdelta3-lib.git
