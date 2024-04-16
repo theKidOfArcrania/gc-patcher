@@ -1,0 +1,6 @@
+Much of this code has been copied from [dolphin's][1] and thus the licenses for
+those particular files hold the same. Overall any new changes is under GPLv2+.
+
+See LICENSES/ directory for copies of relavant licensing.
+
+[1] https://github.com/dolphin-emu/
