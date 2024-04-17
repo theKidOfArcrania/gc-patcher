@@ -1,4 +1,4 @@
-// Copyright 2022 Dolphin Emulator Project
+// Copyright 2021 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -8,5 +8,5 @@
 
 namespace DolphinTool
 {
-int HeaderCommand(const std::vector<std::string>& args);
+int PatchCommand(const std::vector<std::string>& args);
 }  // namespace DolphinTool

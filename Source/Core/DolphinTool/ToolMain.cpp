@@ -15,15 +15,7 @@
 #include "Common/StringUtil.h"
 #include "Common/Version.h"
 
-#include "DolphinTool/ConvertCommand.h"
-#include "DolphinTool/HeaderCommand.h"
-
-static void PrintUsage()
-{
-  fmt::print(std::cerr, "usage: dolphin-tool COMMAND -h\n"
-                        "\n"
-                        "commands supported: [convert, verify, header]\n");
-}
+#include "DolphinTool/PatchCommand.h"
 
 #ifdef _WIN32
 #define main app_main
@@ -31,22 +23,10 @@ static void PrintUsage()
 
 int main(int argc, char* argv[])
 {
-  if (argc < 2)
-  {
-    PrintUsage();
-    return EXIT_FAILURE;
-  }
+  // Take off the program name before passing arguments down
+  const std::vector<std::string> args(argv + 1, argv + argc);
 
-  const std::string_view command_str = argv[1];
-  // Take off the program name and command selector before passing arguments down
-  const std::vector<std::string> args(argv + 2, argv + argc);
-
-  if (command_str == "convert")
-    return DolphinTool::ConvertCommand(args);
-  else if (command_str == "header")
-    return DolphinTool::HeaderCommand(args);
-  PrintUsage();
-  return EXIT_FAILURE;
+  return DolphinTool::PatchCommand(args);
 }
 
 #ifdef _WIN32

@@ -1,15 +1,14 @@
-add_executable(dolphin-tool
-  ConvertCommand.cpp
-  ConvertCommand.h
-  HeaderCommand.cpp
-  HeaderCommand.h
+add_executable(mpatch
+  PatchCommand.cpp
+  PatchCommand.h
   ToolMain.cpp
 )
 
-set_target_properties(dolphin-tool PROPERTIES OUTPUT_NAME dolphin-tool)
+set_target_properties(mpatch PROPERTIES OUTPUT_NAME mpatch)
 
-target_link_libraries(dolphin-tool
+target_link_libraries(mpatch
 PRIVATE
+  xdelta
   discio
   cpp-optparse
   fmt::fmt
@@ -17,8 +16,8 @@ PRIVATE
 
 if(MSVC)
   # Add precompiled header
-  target_link_libraries(dolphin-tool PRIVATE use_pch)
+  target_link_libraries(mpatch PRIVATE use_pch)
 endif()
 
-set(CPACK_PACKAGE_EXECUTABLES ${CPACK_PACKAGE_EXECUTABLES} dolphin-tool)
-install(TARGETS dolphin-tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+set(CPACK_PACKAGE_EXECUTABLES ${CPACK_PACKAGE_EXECUTABLES} mpatch)
+install(TARGETS mpatch RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

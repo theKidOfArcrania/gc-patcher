@@ -1,14 +1,17 @@
 // Copyright 2021 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "DolphinTool/ConvertCommand.h"
+#include "DolphinTool/PatchCommand.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 #include <OptionParser.h>
 #include <fmt/format.h>
@@ -16,12 +19,15 @@
 
 #include "Common/CommonTypes.h"
 #include "DiscIO/Blob.h"
+#include "DiscIO/DiscExtractor.h"
 #include "DiscIO/DiscUtils.h"
 #include "DiscIO/ScrubbedBlob.h"
 #include "DiscIO/Volume.h"
 #include "DiscIO/VolumeDisc.h"
 #include "DiscIO/WIABlob.h"
-//#include "UICommon/UICommon.h"
+#include "xdelta3.h"
+
+namespace fs = std::filesystem;
 
 namespace DolphinTool
 {
@@ -56,11 +62,72 @@ static std::optional<DiscIO::BlobType> ParseFormatString(const std::string& form
   return std::nullopt;
 }
 
-int ConvertCommand(const std::vector<std::string>& args)
+static bool ExtractPartition(
+    const DiscIO::Volume &volume,
+    const DiscIO::Partition &partition,
+    const std::string &export_path)
+{
+  // Extract files
+  auto files_out = export_path + "/files";
+  if (!fs::create_directory(files_out)) {
+    fmt::println(std::cerr, "Error: Unable to create directory: %s", files_out);
+    return false;
+  }
+
+  auto fs = volume.GetFileSystem(partition);
+  if (!fs) {
+    return true;
+  }
+
+  std::unique_ptr<DiscIO::FileInfo> info = fs->FindFileInfo("");
+
+  DiscIO::ExportDirectory(volume, partition, *info, true, "", files_out,
+      [](const std::string& current) {
+        return false;
+      });
+
+  // Extract system data
+  if (!DiscIO::ExportSystemData(volume, partition, export_path)) {
+    fmt::println(std::cerr, "Error: Unable to export system data");
+    return false;
+  }
+  return true;
+}
+
+static std::optional<std::string> PatchDisc(const DiscIO::Volume &volume) {
+  char c_tmp_extract[L_tmpnam];
+  if (!std::tmpnam(c_tmp_extract)) {
+    return std::nullopt;
+  }
+  if (!fs::create_directory(c_tmp_extract)) {
+    fmt::println(std::cerr, "Error: Unable to create directory: %s", c_tmp_extract);
+    return std::nullopt;
+  }
+
+  auto extract_path = std::string(c_tmp_extract);
+  if (volume.GetPartitions().empty()) {
+    if (!ExtractPartition(volume, DiscIO::PARTITION_NONE, extract_path)) {
+      return std::nullopt;
+    }
+  } else {
+    for (DiscIO::Partition &p: volume.GetPartitions()) {
+      if (auto partition_type = volume.GetPartitionType(p)) {
+        auto partition_name = DiscIO::NameForPartitionType(*partition_type, true);
+        if (!ExtractPartition(volume, p, extract_path + "/" + partition_name)) {
+          return std::nullopt;
+        }
+      }
+    }
+  }
+
+  return extract_path;
+}
+
+int PatchCommand(const std::vector<std::string>& args)
 {
   optparse::OptionParser parser;
 
-  parser.usage("usage: convert [options]... [FILE]...");
+  parser.usage("usage: mpatch [options]... [FILE]...");
 
   parser.add_option("-u", "--user")
       .type("string")
@@ -296,6 +363,18 @@ int ConvertCommand(const std::vector<std::string>& args)
     }
   }
 
+  // Apply patch on temp directory
+  auto tmp_disc = PatchDisc(*volume);
+  if (!tmp_disc) {
+    return EXIT_FAILURE;
+  }
+
+  blob_reader = DiscIO::CreateBlobReader(*tmp_disc + "/sys/main.dol");
+
+  char c;
+  std::cout << "Done!" << std::endl;
+  std::cin >> c;
+
   // Perform the conversion
   const auto NOOP_STATUS_CALLBACK = [](const std::string& text, float percent) { return true; };
 
@@ -347,6 +426,8 @@ int ConvertCommand(const std::vector<std::string>& args)
     fmt::print(std::cerr, "Error: Conversion failed\n");
     return EXIT_FAILURE;
   }
+
+  fs::remove_all(*tmp_disc);
 
   return EXIT_SUCCESS;
 }
