@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -41,6 +42,9 @@ namespace fs = std::filesystem;
 
 namespace DolphinTool
 {
+
+typedef std::function<bool(const std::string& path)> UpdateCB;
+
 static std::optional<DiscIO::WIARVZCompressionType>
 ParseCompressionTypeString(const std::string& compression_str)
 {
@@ -101,7 +105,7 @@ static bool ExtractPartition(
     const DiscIO::Volume &volume,
     const DiscIO::Partition &partition,
     const std::string &export_path,
-    const std::function<bool(const std::string& path)>& update_progress)
+    const UpdateCB& update_progress)
 {
   // Extract files
   auto files_out = export_path + "/files";
@@ -125,20 +129,24 @@ static bool ExtractPartition(
   return true;
 }
 
+static const char ALPHANUM[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 class TempDirectory {
 public:
-  static std::optional<TempDirectory> Create() {
-    char c_tmp[L_tmpnam];
-    if (!std::tmpnam(c_tmp)) {
-      return std::nullopt;
+  static TempDirectory Create() {
+    if (!fs::is_directory(fs::temp_directory_path())) {
+      fmt::println(std::cerr, "Error: unable to create temp directory");
+      abort();
     }
-
-    if (!fs::create_directory(c_tmp)) {
-      fmt::println(std::cerr, "Error: Unable to create directory: %s", c_tmp);
-      return std::nullopt;
+    for(;;) {
+      std::string name{ "tmpdir" };
+      for (int i = 0; i < 12; i++) {
+        name += ALPHANUM[generator() % (sizeof(ALPHANUM) - 1)];
+      }
+      auto path = fs::temp_directory_path() / name;
+      if (fs::create_directory(path)) {
+        return TempDirectory(path);
+      }
     }
-
-    return std::optional(TempDirectory(std::string(c_tmp)));
   }
 
   ~TempDirectory() {
@@ -172,7 +180,13 @@ private:
   std::optional<std::string> m_path;
 
   explicit TempDirectory(std::string path): m_path(std::move(path)) {}
+
+  static std::random_device rd;
+  static std::default_random_engine generator;
 };
+
+std::random_device TempDirectory::rd;
+std::default_random_engine TempDirectory::generator{ TempDirectory::rd() };
 
 #define XD3_LIB_ERRMSG(stream, ret) "{}: {}", \
     xd3_errstring (stream), xd3_mainerror (ret)
@@ -192,7 +206,7 @@ public:
   {
   }
 
-  delayed_source(initializer_type initer): m_initer(std::optional(initer)),
+  delayed_source(const initializer_type &initer): m_initer(std::optional(initer)),
     m_source(nullptr), m_out(nullptr)
   {
   }
@@ -263,7 +277,7 @@ static bool set_source(FILE *src_file, xd3_stream &stream, xd3_source &src) {
 }
 
 static bool XD3Entry(bool encode, std::istream &in, delayed_source &delay,
-    std::function<void (xd3_stream&)> configure) {
+    const std::function<void (xd3_stream&)> &configure) {
   int ret;
   uint8_t *input_buf;
   std::streamsize read;
@@ -442,7 +456,8 @@ static bool WritePatch(
   auto compare_path = compare_dir.path() + "/" + file;
   in_file.open(compare_path.c_str());
   if (!in_file) {
-    fmt::println(std::cerr, "mpatch: Unable to open input file: %s", compare_path.c_str());
+    fmt::println(std::cerr, "mpatch: Unable to open input file: {}",
+        compare_path.c_str());
     return false;
   }
 
@@ -496,10 +511,12 @@ static bool WritePatch(
 static bool PatchSingle(
     std::ifstream &patch,
     const TempDirectory& source_dir,
-    const TempDirectory& extract_dir)
+    const TempDirectory& extract_dir,
+    const UpdateCB& callback)
 {
-  delayed_source initer([&source_dir, &extract_dir](const uint8_t *appdata, usize_t size) ->
-      delayed_source::initializer_return
+  delayed_source initer([&source_dir, &extract_dir, &callback]
+      (const uint8_t *appdata, usize_t size) ->
+        delayed_source::initializer_return
   {
     FILE *src_file = nullptr;
     auto out_file = std::make_unique<std::ofstream>();
@@ -533,6 +550,7 @@ static bool PatchSingle(
       }
     }
 
+    callback((char*)(appdata + header.out_file_off));
     auto out_path = extract_dir.path() + "/" + (char*)(appdata + header.out_file_off);
     fs::create_directories(fs::path(out_path).parent_path());
     out_file->open(out_path.c_str());
@@ -553,10 +571,10 @@ static bool PatchSingle(
 static std::optional<TempDirectory> ExtractDisk(
     const std::string &location,
     const DiscIO::Volume &volume,
-    DiscIO::CompressCB callback,
+    const DiscIO::CompressCB &callback,
     uint32_t *count = nullptr)
 {
-  auto extract_dir = OTRY(TempDirectory::Create());
+  auto extract_dir = TempDirectory::Create();
 
   fmt::println(std::cerr, "Extracting from {}...", location.c_str());
   uint32_t extract_cnt = 0;
@@ -607,40 +625,6 @@ static std::optional<TempDirectory> ExtractDisk(
   return std::move(extract_dir);
 }
 
-static std::optional<TempDirectory> PatchDisc(
-    const DiscIO::Volume &volume,
-    const std::string &patch,
-    DiscIO::CompressCB callback)
-{
-  auto extract_dir = OTRY(ExtractDisk("source", volume, [&callback](auto text, auto percent) {
-    return callback(text, percent);
-  }));
-  auto out_dir = OTRY(TempDirectory::Create());
-
-  // Slowly go through the patch
-  std::ifstream patch_file(patch.c_str());
-  if (!patch_file) {
-    fmt::println(std::cerr, "mpatch: Unable to open source file: %s", patch.c_str());
-    return std::nullopt;
-  }
-
-  patch_file.peek();
-  while (!patch_file.eof()) {
-    if (!PatchSingle(patch_file, extract_dir, out_dir)) {
-      return std::nullopt;
-    }
-
-    patch_file.peek();
-    if (patch_file.bad()) {
-      fmt::println(std::cerr, "mpatch: Bad patch file!");
-      return std::nullopt;
-    }
-  }
-
-  // TODO: make sure this is not deleted?
-  return out_dir;
-}
-
 static bool status_callback(const std::string& text, float percent) {
   char progress[30 + 1];
   progress[sizeof(progress) - 1] = 0;
@@ -653,13 +637,79 @@ static bool status_callback(const std::string& text, float percent) {
     fmt::println("");
   }
   return true;
-};
+}
+
+static std::optional<TempDirectory> PatchDisc(
+    const DiscIO::Volume &volume,
+    const std::string &patch,
+    const DiscIO::CompressCB &callback)
+{
+  auto extract_dir = OTRY(ExtractDisk("source", volume,
+        [&callback](auto text, auto percent) {
+          return callback(text, percent);
+        }));
+  auto out_dir = TempDirectory::Create();
+
+  // Slowly go through the patch
+  std::ifstream patch_file(patch.c_str());
+  if (!patch_file) {
+    fmt::println(std::cerr, "mpatch: Unable to open source file: {}",
+        patch.c_str());
+    return std::nullopt;
+  }
+
+  if (!patch_file.seekg(0, std::ios_base::seekdir::_S_end)) {
+    fmt::println(std::cerr, "mpatch: Unable to determine size of source file: {}",
+        patch.c_str());
+    return std::nullopt;
+  }
+
+  uint32_t file_size = patch_file.tellg();
+  if (!patch_file.seekg(0)) {
+    fmt::println(std::cerr, "mpatch: Unable to reset pos: {}", patch.c_str());
+    return std::nullopt;
+  }
+
+  fmt::println("Patching files...");
+  auto markers = std::max(file_size / 100u, 1u);
+  auto next_marker = 0u;
+  patch_file.peek(); // Need to ensure that the eof/bad flags get updated
+  while (!patch_file.eof()) {
+    uint32_t cur_pos = patch_file.tellg();
+    if (!PatchSingle(patch_file, extract_dir, out_dir,
+          [markers, &next_marker, file_size, cur_pos](auto file) {
+            // If this current status reaches the next marker milestone, update the
+            // progress ticker
+            if (next_marker <= cur_pos) {
+              next_marker = ((cur_pos + markers - 1) / markers) * markers;
+              return status_callback("Patching " + file,
+                  (float)cur_pos / file_size);
+            } else {
+              return false;
+            }
+          }))
+    {
+      return std::nullopt;
+    }
+
+
+    patch_file.peek(); // Need to ensure that the eof/bad flags get updated
+    if (patch_file.bad()) {
+      fmt::println(std::cerr, "mpatch: Bad patch file!");
+      return std::nullopt;
+    }
+  }
+  status_callback("Finished", 1.0);
+
+  // TODO: make sure this is not deleted?
+  return out_dir;
+}
 
 static std::string FixInputPath(const std::string &file) {
   std::string ret;
   if (fs::is_directory(file)) {
     if (!fs::is_regular_file(file + "/sys/main.dol")) {
-      fmt::print(std::cerr, "\"%s\" is a directory but can't find ./sys/main.dol",
+      fmt::print(std::cerr, "\"{}\" is a directory but can't find ./sys/main.dol",
           file.c_str());
     } else {
       ret = file + "/sys/main.dol";
@@ -670,7 +720,7 @@ static std::string FixInputPath(const std::string &file) {
   return ret;
 }
 
-static int DoPatchCommand(const optparse::Values& options,
+static int ApplyPatch(const optparse::Values& options,
     const std::string &patch_file_path,
     const std::string &source_path,
     const std::string &compare_path)
@@ -828,9 +878,8 @@ static int DoPatchCommand(const optparse::Values& options,
   blob_reader = DiscIO::CreateBlobReader(tmp_disc->path() + "/sys/main.dol");
 
   // Perform the conversion
-
   bool success = false;
-
+  fmt::println("Creating output file...");
   switch (format) {
     case DiscIO::BlobType::PLAIN:
     {
@@ -869,6 +918,7 @@ static int DoPatchCommand(const optparse::Values& options,
       break;
     }
   }
+  status_callback("Finished", 1.0);
 
   if (!success) {
     fmt::print(std::cerr, "mpatch: Conversion failed\n");
@@ -876,6 +926,78 @@ static int DoPatchCommand(const optparse::Values& options,
   }
 
   return EXIT_SUCCESS;
+}
+
+static int MakePatch(const std::string &patch_file_path,
+    const std::string &source_path,
+    const std::string &compare_path)
+{
+  auto source_volume = DiscIO::CreateVolume(source_path);
+  if (!source_volume)
+  {
+    fmt::print(std::cerr, "mpatch: The source file could not be opened.\n");
+    return EXIT_FAILURE;
+  }
+  auto compare_volume = DiscIO::CreateVolume(compare_path);
+  if (!compare_volume)
+  {
+    fmt::print(std::cerr, "mpatch: The input file could not be opened.\n");
+    return EXIT_FAILURE;
+  }
+
+  // Extract to temporary directories
+  uint32_t source_files = 0;
+  uint32_t compare_files = 0;
+  auto source_tmp_path = ExtractDisk("source", *source_volume, status_callback, &source_files);
+  if (!source_tmp_path) {
+    return EXIT_FAILURE;
+  }
+  auto compare_tmp_path = ExtractDisk("input disk", *compare_volume, status_callback, &compare_files);
+  if (!compare_tmp_path) {
+    return EXIT_FAILURE;
+  }
+  std::unordered_map<std::string, std::string> file_lookups;
+
+  fmt::println(std::cerr, "Checking files...");
+  uint32_t status = 0;
+  for (auto file: fs::recursive_directory_iterator(source_tmp_path->path())) {
+    if (file.is_regular_file()) {
+      auto hash = FileHash(file.path());
+      auto rel_path = fs::relative(file.path(), source_tmp_path->path());
+      if (!hash) {
+        fmt::println(std::cerr, "mpatch: Failed to hash {}", file.path().c_str());
+        return EXIT_FAILURE;
+      }
+
+      file_lookups.insert(std::pair(*hash, rel_path));
+      status_callback("Checking " + rel_path.string(), ((float)status++ / source_files));
+    }
+  }
+  status_callback("Finished", 1.0);
+
+  fmt::println(std::cerr, "Writing patch...");
+  std::ofstream patch_file(patch_file_path);
+  if (!patch_file) {
+    fmt::println(std::cerr, "mpatch: The patch file could not be opened for write.");
+    return EXIT_FAILURE;
+  }
+
+  status = 0;
+  for (auto file: fs::recursive_directory_iterator(source_tmp_path->path())) {
+    if (file.is_regular_file()) {
+      auto rel_path = fs::relative(file.path(), source_tmp_path->path());
+      auto rel_path_str = rel_path.string();
+      status_callback("Patching " + rel_path.string(), ((float)status++ / source_files));
+      auto ret = WritePatch(patch_file, *source_tmp_path, *compare_tmp_path,
+          rel_path_str, file_lookups);
+      if (!ret) {
+        return EXIT_FAILURE;
+      }
+    }
+  }
+  status_callback("Finished", 1.0);
+
+  return 0;
 }
 
 int PatchCommand(const std::vector<std::string>& args) {
@@ -1010,75 +1132,9 @@ int PatchCommand(const std::vector<std::string>& args) {
   // Open the blob reader
 
   if (!creating_patch) {
-    return DoPatchCommand(options, patch_file_path, source_path, compare_path);
+    return ApplyPatch(options, patch_file_path, source_path, compare_path);
   } else {
-    auto source_volume = DiscIO::CreateVolume(source_path);
-    if (!source_volume)
-    {
-      fmt::print(std::cerr, "mpatch: The source file could not be opened.\n");
-      return EXIT_FAILURE;
-    }
-    auto compare_volume = DiscIO::CreateVolume(compare_path);
-    if (!compare_volume)
-    {
-      fmt::print(std::cerr, "mpatch: The input file could not be opened.\n");
-      return EXIT_FAILURE;
-    }
-
-    // Extract to temporary directories
-    uint32_t source_files = 0;
-    uint32_t compare_files = 0;
-    auto source_tmp_path = ExtractDisk("source", *source_volume, status_callback, &source_files);
-    if (!source_tmp_path) {
-      return EXIT_FAILURE;
-    }
-    auto compare_tmp_path = ExtractDisk("input disk", *compare_volume, status_callback, &compare_files);
-    if (!compare_tmp_path) {
-      return EXIT_FAILURE;
-    }
-    std::unordered_map<std::string, std::string> file_lookups;
-
-    fmt::println(std::cerr, "Checking files...");
-    uint32_t status = 0;
-    for (auto file: fs::recursive_directory_iterator(source_tmp_path->path())) {
-      if (file.is_regular_file()) {
-        auto hash = FileHash(file.path());
-        auto rel_path = fs::relative(file.path(), source_tmp_path->path());
-        if (!hash) {
-          fmt::println(std::cerr, "mpatch: Failed to hash {}", file.path().c_str());
-          return EXIT_FAILURE;
-        }
-
-        file_lookups.insert(std::pair(*hash, rel_path));
-        status_callback("Checking " + rel_path.string(), ((float)status++ / source_files));
-      }
-    }
-    status_callback("Finished", 1.0);
-
-    fmt::println(std::cerr, "Writing patch...");
-    std::ofstream patch_file(patch_file_path);
-    if (!patch_file) {
-      fmt::println(std::cerr, "mpatch: The patch file could not be opened for write.");
-      return EXIT_FAILURE;
-    }
-
-    status = 0;
-    for (auto file: fs::recursive_directory_iterator(source_tmp_path->path())) {
-      if (file.is_regular_file()) {
-        auto rel_path = fs::relative(file.path(), source_tmp_path->path());
-        auto rel_path_str = rel_path.string();
-        status_callback("Patching " + rel_path.string(), ((float)status++ / source_files));
-        auto ret = WritePatch(patch_file, *source_tmp_path, *compare_tmp_path,
-            rel_path_str, file_lookups);
-        if (!ret) {
-          return EXIT_FAILURE;
-        }
-      }
-    }
-
-    fmt::println(std::cerr, "");
-
-    return 0;
+    return MakePatch(patch_file_path, source_path, compare_path);
   }
 }
 
