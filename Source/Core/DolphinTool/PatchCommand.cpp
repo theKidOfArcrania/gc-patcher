@@ -1062,11 +1062,6 @@ int PatchCommand(const std::vector<std::string>& args) {
 
   const optparse::Values& options = parser.parse_args(args);
 
-  // Initialize the dolphin user directory, required for temporary processing files
-  // If this is not set, destructive file operations could occur due to path confusion
-  //UICommon::SetUserDirectory(options["user"]);
-  //UICommon::Init();
-
   // Validate options
 
   // --source
