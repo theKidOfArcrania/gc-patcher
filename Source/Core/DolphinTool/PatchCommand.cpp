@@ -883,13 +883,6 @@ int PatchCommand(const std::vector<std::string>& args) {
 
   parser.usage("usage: mpatch [options]... [FILE]...");
 
-  parser.add_option("-u", "--user")
-      .type("string")
-      .action("store")
-      .help("User folder path, required for temporary processing files. "
-            "Will be automatically created if this option is not set.")
-      .set_default("");
-
   parser.add_option("-s", "--source")
       .type("string")
       .action("store")
