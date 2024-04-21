@@ -1,3 +1,6 @@
+// Copyright 2024 theKidOfArcrania
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #include <ios>
 #include <fstream>
 

@@ -1,4 +1,4 @@
-// Copyright 2021 Dolphin Emulator Project
+// Copyright 2024 theKidOfArcrania
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
