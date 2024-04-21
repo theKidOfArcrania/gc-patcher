@@ -1,6 +1,8 @@
 add_executable(mpatch
   PatchCommand.cpp
   PatchCommand.h
+  SectionStream.cpp
+  SectionStream.h
   ToolMain.cpp
 )
 
@@ -12,6 +14,7 @@ PRIVATE
   discio
   cpp-optparse
   fmt::fmt
+  MbedTLS::mbedtls
 )
 
 if(MSVC)
