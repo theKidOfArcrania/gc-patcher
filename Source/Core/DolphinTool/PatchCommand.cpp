@@ -106,7 +106,7 @@ static bool ExtractPartition(
   // Extract files
   auto files_out = export_path + "/files";
   if (!fs::create_directory(files_out)) {
-    fmt::println(std::cerr, "gc-patch: Unable to create directory: {}", files_out);
+    fmt::println(std::cerr, "mpatch: Unable to create directory: {}", files_out);
     return false;
   }
 
@@ -284,7 +284,7 @@ static bool XD3Entry(bool encode, std::istream &in, delayed_source &delay,
   auto maybe_src = delay.try_source();
   if (maybe_src) {
     if (!set_source(maybe_src, stream, src)) {
-      fmt::println(std::cerr, "gc-patch: Unable to load source file");
+      fmt::println(std::cerr, "mpatch: Unable to load source file");
       return false;
     }
   }
@@ -313,7 +313,7 @@ static bool XD3Entry(bool encode, std::istream &in, delayed_source &delay,
         continue;
       case XD3_OUTPUT:
         if (!delay.out().write((char*)stream.next_out, stream.avail_out)) {
-          fmt::println(std::cerr, "gc-patch: failed to write to output file");
+          fmt::println(std::cerr, "mpatch: failed to write to output file");
           return false;
         }
 
@@ -337,7 +337,7 @@ static bool XD3Entry(bool encode, std::istream &in, delayed_source &delay,
             auto maybe_src2 = delay.source();
             if (maybe_src2) {
               if (!set_source(maybe_src2, stream, src)) {
-                fmt::println(std::cerr, "gc-patch: Unable to load source file");
+                fmt::println(std::cerr, "mpatch: Unable to load source file");
                 return false;
               }
             }
@@ -352,7 +352,7 @@ static bool XD3Entry(bool encode, std::istream &in, delayed_source &delay,
           auto src_file = delay.source();
           if (delay.source()) {
             if (fseek(src_file, src.blksize * src.getblkno, SEEK_SET)) {
-              fmt::println(std::cerr, "gc-patch: Unable to seek in file");
+              fmt::println(std::cerr, "mpatch: Unable to seek in file");
               return false;
             }
             src.onblk = fread((void*)src.curblk, 1, src.blksize, src_file);
@@ -393,7 +393,7 @@ static std::optional<std::string> FileHash(const std::string &file) {
 
   reader.open(file);
   if (!reader) {
-    fmt::println(std::cerr, "gc-patch: Unable to open input file: {}", file.c_str());
+    fmt::println(std::cerr, "mpatch: Unable to open input file: {}", file.c_str());
     goto cleanup;
   }
 
@@ -402,12 +402,12 @@ static std::optional<std::string> FileHash(const std::string &file) {
 
   while ((read = reader.read(buff, 0x1000).gcount()) > 0) {
     if (reader.bad()) {
-      fmt::println(std::cerr, "gc-patch: Unable to read input file: {}", file.c_str());
+      fmt::println(std::cerr, "mpatch: Unable to read input file: {}", file.c_str());
       goto cleanup2;
     }
 
     if ((ret = mbedtls_sha256_update_ret(&ctx, (u8*)buff, read)) < 0) {
-      fmt::println(std::cerr, "gc-patch: {}: Hash computation failed ({}): {}",
+      fmt::println(std::cerr, "mpatch: {}: Hash computation failed ({}): {}",
           file.c_str(), ret, mbedtls_high_level_strerr(ret));
       goto cleanup2;
     }
@@ -415,7 +415,7 @@ static std::optional<std::string> FileHash(const std::string &file) {
 
   u8 out_buf[32];
   if ((ret = mbedtls_sha256_finish_ret(&ctx, out_buf)) < 0) {
-    fmt::println(std::cerr, "gc-patch: {}: Final hash computation failed ({}): {}",
+    fmt::println(std::cerr, "mpatch: {}: Final hash computation failed ({}): {}",
         file.c_str(), ret, mbedtls_high_level_strerr(ret));
     goto cleanup2;
   }
@@ -442,7 +442,7 @@ static bool WritePatch(
   auto compare_path = compare_dir.path() + "/" + file;
   in_file.open(compare_path.c_str());
   if (!in_file) {
-    fmt::println(std::cerr, "gc-patch: Unable to open input file: %s", compare_path.c_str());
+    fmt::println(std::cerr, "mpatch: Unable to open input file: %s", compare_path.c_str());
     return false;
   }
 
@@ -461,7 +461,7 @@ static bool WritePatch(
     auto source_path = source_dir.path() + "/" + file;
     src_file = fopen(source_path.c_str(), "r");
     if (src_file == nullptr) {
-      fmt::println(std::cerr, "gc-patch: Unable to open source file: {}", source_path.c_str());
+      fmt::println(std::cerr, "mpatch: Unable to open source file: {}", source_path.c_str());
       return false;
     }
   } else {
@@ -487,7 +487,7 @@ static bool WritePatch(
     xd3_set_appheader(&config, header, header_len);
   });
   if (patch_buf.pubsync() < 0) {
-    fmt::println(std::cerr, "gc-patch: Unable to write to patch file");
+    fmt::println(std::cerr, "mpatch: Unable to write to patch file");
     return false;
   }
   return ret;
@@ -506,20 +506,20 @@ static bool PatchSingle(
     Xdelta3PatchHeader header;
 
     if (size <= sizeof(*appdata)) {
-      fmt::println(std::cerr, "gc-patch: patch header is too small (%d), "
+      fmt::println(std::cerr, "mpatch: patch header is too small (%d), "
           "did you use the wrong tool to create this patch?", size);
       return std::nullopt;
     }
 
     header = *reinterpret_cast<const Xdelta3PatchHeader*>(appdata);
     if (header.tag != PATCH_MAGIC) {
-      fmt::println(std::cerr, "gc-patch: not a valid patch appdata header, "
+      fmt::println(std::cerr, "mpatch: not a valid patch appdata header, "
           "did you use the wrong tool to create this patch?");
       return std::nullopt;
     }
 
     if (size < header.out_file_off || size < header.src_file_off) {
-      fmt::println(std::cerr, "gc-patch: offsets out of bounds");
+      fmt::println(std::cerr, "mpatch: offsets out of bounds");
       return std::nullopt;
     }
 
@@ -527,7 +527,7 @@ static bool PatchSingle(
       auto src_path = source_dir.path() + "/" + (char*)(appdata + header.src_file_off);
       src_file = fopen(src_path.c_str(), "r");
       if (src_file == nullptr) {
-        fmt::println(std::cerr, "gc-patch: Unable to open source file: {}",
+        fmt::println(std::cerr, "mpatch: Unable to open source file: {}",
             (char*)(appdata + header.src_file_off));
         return std::nullopt;
       }
@@ -537,7 +537,7 @@ static bool PatchSingle(
     fs::create_directories(fs::path(out_path).parent_path());
     out_file->open(out_path.c_str());
     if (!*out_file) {
-      fmt::println(std::cerr, "gc-patch: Unable to open output file: {}",
+      fmt::println(std::cerr, "mpatch: Unable to open output file: {}",
           (char*)(appdata + header.out_file_off));
       return std::nullopt;
     }
@@ -620,7 +620,7 @@ static std::optional<TempDirectory> PatchDisc(
   // Slowly go through the patch
   std::ifstream patch_file(patch.c_str());
   if (!patch_file) {
-    fmt::println(std::cerr, "gc-patch: Unable to open source file: %s", patch.c_str());
+    fmt::println(std::cerr, "mpatch: Unable to open source file: %s", patch.c_str());
     return std::nullopt;
   }
 
@@ -632,7 +632,7 @@ static std::optional<TempDirectory> PatchDisc(
 
     patch_file.peek();
     if (patch_file.bad()) {
-      fmt::println(std::cerr, "gc-patch: Bad patch file!");
+      fmt::println(std::cerr, "mpatch: Bad patch file!");
       return std::nullopt;
     }
   }
@@ -686,7 +686,7 @@ static int DoPatchCommand(const optparse::Values& options,
   std::unique_ptr<DiscIO::BlobReader> blob_reader = DiscIO::CreateBlobReader(source_path);
   if (!blob_reader)
   {
-    fmt::print(std::cerr, "gc-patch: The source file could not be opened.\n");
+    fmt::print(std::cerr, "mpatch: The source file could not be opened.\n");
     return EXIT_FAILURE;
   }
 
@@ -695,7 +695,7 @@ static int DoPatchCommand(const optparse::Values& options,
   std::unique_ptr<DiscIO::Volume> volume = DiscIO::CreateDisc(source_path);
   if (!volume) {
     if (scrub) {
-      fmt::print(std::cerr, "gc-patch: Error: Scrubbing is only supported for GC/Wii disc images.\n");
+      fmt::print(std::cerr, "mpatch: Error: Scrubbing is only supported for GC/Wii disc images.\n");
       return EXIT_FAILURE;
     }
 
@@ -871,7 +871,7 @@ static int DoPatchCommand(const optparse::Values& options,
   }
 
   if (!success) {
-    fmt::print(std::cerr, "gc-patch: Conversion failed\n");
+    fmt::print(std::cerr, "mpatch: Conversion failed\n");
     return EXIT_FAILURE;
   }
 
@@ -957,7 +957,7 @@ int PatchCommand(const std::vector<std::string>& args) {
   // --source
   if (!options.is_set("source"))
   {
-    fmt::print(std::cerr, "gc-patch: No source set\n");
+    fmt::print(std::cerr, "mpatch: No source set\n");
     return EXIT_FAILURE;
   }
   std::string source_path = FixInputPath(options["source"]);
@@ -970,7 +970,7 @@ int PatchCommand(const std::vector<std::string>& args) {
   std::string compare_path;
   if (options.is_set("output")) {
     if (options.is_set("input")) {
-      fmt::print(std::cerr, "gc-patch: Cannot set both -i and -o options\n");
+      fmt::print(std::cerr, "mpatch: Cannot set both -i and -o options\n");
       return EXIT_FAILURE;
     }
     compare_path = options["output"];
@@ -981,36 +981,36 @@ int PatchCommand(const std::vector<std::string>& args) {
       return EXIT_FAILURE;
     }
   } else {
-    fmt::print(std::cerr, "gc-patch: No input nor output set\n");
+    fmt::print(std::cerr, "mpatch: No input nor output set\n");
     return EXIT_FAILURE;
   }
 
   // --patch
   if (!options.is_set("patch"))
   {
-    fmt::print(std::cerr, "gc-patch: No patch set\n");
+    fmt::print(std::cerr, "mpatch: No patch set\n");
     return EXIT_FAILURE;
   }
   const std::string& patch_file_path = options["patch"];
 
   if (creating_patch) {
     if (options.is_set("format")) {
-      fmt::print(std::cerr, "gc-patch: Warning: -f has no effect on -i mode");
+      fmt::print(std::cerr, "mpatch: Warning: -f has no effect on -i mode");
     }
     if (options.is_set("scrub")) {
-      fmt::print(std::cerr, "gc-patch: Warning: --scrub has no effect on -i mode");
+      fmt::print(std::cerr, "mpatch: Warning: --scrub has no effect on -i mode");
     }
     if (options.is_set("block_size")) {
-      fmt::print(std::cerr, "gc-patch: Warning: -b has no effect on -i mode");
+      fmt::print(std::cerr, "mpatch: Warning: -b has no effect on -i mode");
     }
     if (options.is_set("block_size")) {
-      fmt::print(std::cerr, "gc-patch: Warning: -b has no effect on -i mode");
+      fmt::print(std::cerr, "mpatch: Warning: -b has no effect on -i mode");
     }
     if (options.is_set("compression")) {
-      fmt::print(std::cerr, "gc-patch: Warning: -c has no effect on -i mode");
+      fmt::print(std::cerr, "mpatch: Warning: -c has no effect on -i mode");
     }
     if (options.is_set("compression_level")) {
-      fmt::print(std::cerr, "gc-patch: Warning: -l has no effect on -i mode");
+      fmt::print(std::cerr, "mpatch: Warning: -l has no effect on -i mode");
     }
   }
 
@@ -1022,13 +1022,13 @@ int PatchCommand(const std::vector<std::string>& args) {
     auto source_volume = DiscIO::CreateVolume(source_path);
     if (!source_volume)
     {
-      fmt::print(std::cerr, "gc-patch: The source file could not be opened.\n");
+      fmt::print(std::cerr, "mpatch: The source file could not be opened.\n");
       return EXIT_FAILURE;
     }
     auto compare_volume = DiscIO::CreateVolume(compare_path);
     if (!compare_volume)
     {
-      fmt::print(std::cerr, "gc-patch: The input file could not be opened.\n");
+      fmt::print(std::cerr, "mpatch: The input file could not be opened.\n");
       return EXIT_FAILURE;
     }
 
@@ -1052,7 +1052,7 @@ int PatchCommand(const std::vector<std::string>& args) {
         auto hash = FileHash(file.path());
         auto rel_path = fs::relative(file.path(), source_tmp_path->path());
         if (!hash) {
-          fmt::println(std::cerr, "gc-patch: Failed to hash {}", file.path().c_str());
+          fmt::println(std::cerr, "mpatch: Failed to hash {}", file.path().c_str());
           return EXIT_FAILURE;
         }
 
@@ -1065,7 +1065,7 @@ int PatchCommand(const std::vector<std::string>& args) {
     fmt::println(std::cerr, "Writing patch...");
     std::ofstream patch_file(patch_file_path);
     if (!patch_file) {
-      fmt::println(std::cerr, "gc-patch: The patch file could not be opened for write.");
+      fmt::println(std::cerr, "mpatch: The patch file could not be opened for write.");
       return EXIT_FAILURE;
     }
 
