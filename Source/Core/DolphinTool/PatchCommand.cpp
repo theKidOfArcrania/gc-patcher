@@ -476,7 +476,8 @@ static bool WritePatch(
     auto source_path = source_dir.path() + "/" + file;
     src_file = fopen(source_path.c_str(), "r");
     if (src_file == nullptr) {
-      fmt::println(std::cerr, "mpatch: Unable to open source file: {}", source_path.c_str());
+      fmt::println(std::cerr, "mpatch: Unable to open source file: {}",
+          source_path.c_str());
       return false;
     }
   } else {
@@ -485,18 +486,25 @@ static bool WritePatch(
 
   wrbuf_section patch_buf(patch);
   delayed_source source(src_file, std::make_unique<std::ostream>(&patch_buf));
-  auto ret = XD3Entry(true, in_file, source, [&file, &src_file_path](xd3_stream &config) {
+  auto ret = XD3Entry(true, in_file, source, [&file, &src_file_path, src_file](xd3_stream &config) {
     uint32_t src_file_off = sizeof(Xdelta3PatchHeader);
     uint32_t out_file_off = src_file_off + src_file_path.length() + 1;
-    usize_t header_len = sizeof(Xdelta3PatchHeader) + 2 + file.length() + src_file_path.length();
+    if (src_file == NULL) {
+      out_file_off = src_file_off;
+      src_file_off = 0;
+    }
+
+    usize_t header_len = out_file_off + 1 + file.length();
     uint8_t *header = new uint8_t[header_len];
     *reinterpret_cast<Xdelta3PatchHeader*>(header) = Xdelta3PatchHeader {
       PATCH_MAGIC,
       src_file_off,
       out_file_off,
     };
-    memcpy(header + src_file_off, src_file_path.c_str(), src_file_path.length());
-    header[out_file_off - 1] = 0;
+    if (src_file != NULL) {
+      memcpy(header + src_file_off, src_file_path.c_str(), src_file_path.length());
+      header[out_file_off - 1] = 0;
+    }
     memcpy(header + out_file_off, file.c_str(), file.length());
     header[out_file_off + file.length()] = 0;
     xd3_set_appheader(&config, header, header_len);
@@ -983,9 +991,9 @@ static int MakePatch(const std::string &patch_file_path,
   }
 
   status = 0;
-  for (auto file: fs::recursive_directory_iterator(source_tmp_path->path())) {
+  for (auto file: fs::recursive_directory_iterator(compare_tmp_path->path())) {
     if (file.is_regular_file()) {
-      auto rel_path = fs::relative(file.path(), source_tmp_path->path());
+      auto rel_path = fs::relative(file.path(), compare_tmp_path->path());
       auto rel_path_str = rel_path.string();
       status_callback("Patching " + rel_path.string(), ((float)status++ / source_files));
       auto ret = WritePatch(patch_file, *source_tmp_path, *compare_tmp_path,
